@@ -18,9 +18,36 @@
 
 ## Welcome!
 
-Prefect multiprocess task runner.
+This Prefect collection contains a Multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound will be complete significantly faster in `ConcurrentTaskRunner`.
 
 ## Getting Started
+
+Install the package by running:
+```
+pip install git+https://github.com/rpeden/prefect-multiprocess
+```
+
+Then, use the task runner in your Prefect flows. The task runner only accepts one parameter: `number_of_processes`, which controls the number of worker processes to start for running tasks. If not provided, it defaults to the number of CPUs on the host machine.
+
+Examples:
+
+Create one process for every CPU/CPU core
+```python
+from prefect import flow
+from prefect_multiprocess.task_runners import MultiprocessTaskRunner
+
+
+@flow(task_runner=MultiprocessTaskRunner())
+def my_flow():
+    ...
+```
+
+Customizing the number of processes:
+```python
+@flow(task_runner=MultiprocessTaskRunner(number_of_processes=4))
+def my_flow():
+    ...
+```
 
 ### Python setup
 
@@ -29,40 +56,6 @@ Requires an installation of Python 3.7+.
 We recommend using a Python virtual environment manager such as pipenv, conda or virtualenv.
 
 These tasks are designed to work with Prefect 2.0. For more information about how to use Prefect, please refer to the [Prefect documentation](https://orion-docs.prefect.io/).
-
-### Installation
-
-Install `prefect-multiprocess` with `pip`:
-
-```bash
-pip install prefect-multiprocess
-```
-
-Then, register to [view the block](https://orion-docs.prefect.io/ui/blocks/) on Prefect Cloud:
-
-```bash
-prefect block register -m prefect_multiprocess.credentials
-```
-
-Note, to use the `load` method on Blocks, you must already have a block document [saved through code](https://orion-docs.prefect.io/concepts/blocks/#saving-blocks) or [saved through the UI](https://orion-docs.prefect.io/ui/blocks/).
-
-### Write and run a flow
-
-```python
-from prefect import flow
-from prefect_multiprocess.tasks import (
-    goodbye_prefect_multiprocess,
-    hello_prefect_multiprocess,
-)
-
-
-@flow
-def example_flow():
-    hello_prefect_multiprocess
-    goodbye_prefect_multiprocess
-
-example_flow()
-```
 
 ## Resources
 

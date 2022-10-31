@@ -1,5 +1,5 @@
 """
-Interface and implementations of the Ray Task Runner.
+Interface and implementations of the Multiprocess task runner.
 [Task Runners](https://orion-docs.prefect.io/api-ref/prefect/task-runners/)
 in Prefect are responsible for managing the execution of Prefect task runs.
 Generally speaking, users are not expected to interact with
@@ -37,19 +37,19 @@ Example:
     #9
     ```
 
-    Switching to a `RayTaskRunner`:
+    Switching to a `MultiprocessTaskRunner`:
     ```python
     import time
 
     from prefect import flow, task
-    from prefect_ray import RayTaskRunner
+    from prefect_multiprocess import MultiprocessTaskRunner
 
     @task
     def shout(number):
         time.sleep(0.5)
         print(f"#{number}")
 
-    @flow(task_runner=RayTaskRunner)
+    @flow(task_runner=MultiprocessTaskRunner)
     def count_to(highest_number):
         for number in range(highest_number):
             shout.submit(number)
@@ -75,7 +75,7 @@ from contextlib import AsyncExitStack
 from functools import partial
 from multiprocessing.pool import Pool
 import threading
-from typing import Awaitable, Callable, Optional, Union
+from typing import Awaitable, Callable, Optional, Tuple, Union
 from uuid import UUID
 
 import anyio
@@ -102,37 +102,26 @@ async def run_task_async(task_fn):
         return await exception_to_crashed_state(exc)
 
 
-def run_task(task_fn, result_obj):
+def task_thread(task_fn, result_obj):
     result = anyio.run(run_task_async, task_fn)
     result_obj.set_result(result)
 
 
-import os
+def run_remote_task(task_callable, key):
+    unpickled_call = cloudpickle.loads(task_callable)
+    # run the remote task in a new thread
+    task_output = ThreadReturn()
+    worker_thread = threading.Thread(
+        target=task_thread, args=(unpickled_call, task_output)
+    )
+    worker_thread.start()
+    worker_thread.join()
 
+    result = cloudpickle.dumps(
+        task_output.return_value
+    )  
+    return (result, key)
 
-def run(func, key):
-    unpickled_call = cloudpickle.loads(func)
-    print(f"task running in pid {os.getpid()}")
-    try:
-        # run in a new thread so we can run the task
-        # in async context
-        result = ThreadReturn()
-        worker_thread = threading.Thread(target=run_task, args=(unpickled_call, result))
-        worker_thread.start()
-        worker_thread.join()
-
-        # result = anyio.run(run_task_async, unpickled_call)
-        res = cloudpickle.dumps(
-            result.return_value
-        )  # anyio.run(unpickled_call)  # begin_task_run(**kwargs)
-        return (res, key)
-        # queue.put((res, key))
-        # fut = asyncio.gather(res)
-    except Exception as e:
-        print(f"wtf {e}")
-    # unpickled_call = cloudpickle.loads(func)
-    # result = unpickled_call()
-    # return result
 
 
 class Event:
@@ -149,27 +138,30 @@ class Event:
 
 class MultiprocessTaskRunner(BaseTaskRunner):
     """
-    A parallel task_runner that submits tasks to `ray`.
-    By default, a temporary Ray cluster is created for the duration of the flow run.
-    Alternatively, if you already have a `ray` instance running, you can provide
-    the connection URL via the `address` kwarg.
+    A parallel task_runner that submits tasks to uses Python's `multiprocessing`
+    module to run tasks using multiple Python processes.
     Args:
-        address (string, optional): Address of a currently running `ray` instance; if
-            one is not provided, a temporary instance will be created.
-        init_kwargs (dict, optional): Additional kwargs to use when calling `ray.init`.
+        number_of_processes (int, optional): The number of processes to use for 
+        running tasks. If not provided, defaults to the number of CPUs on the 
+        host machine.
     Examples:
-        Using a temporary local ray cluster:
+
+        Create one process for every CPU/CPU core
         ```python
         from prefect import flow
-        from prefect_ray.task_runners import RayTaskRunner
+        from prefect_multiprocess.task_runners import MultiprocessTaskRunner
 
-        @flow(task_runner=RayTaskRunner())
+        
+        @flow(task_runner=MultiprocessTaskRunner())
         def my_flow():
             ...
         ```
-        Connecting to an existing ray instance:
+
+        Customizing the number of processes:
         ```python
-        RayTaskRunner(address="ray://192.0.2.255:8786")
+        @flow(task_runner=MultiprocessTaskRunner(number_of_processes=4))
+        def my_flow():
+            ...
         ```
     """
 
@@ -177,7 +169,6 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         self.number_of_processes = number_of_processes
         self._task_results = {}
         self._task_completion_events = {}
-        self.completed = 0
 
         super().__init__()
 
@@ -194,30 +185,30 @@ class MultiprocessTaskRunner(BaseTaskRunner):
             raise RuntimeError(
                 "The task runner must be started before submitting work."
             )
-
-        self._task_completion_events[key] = Event()
-
-        def callback(ret):
-            (result, key) = ret
+        """
+        Submits a task to the task runner.
+        """
+        def remote_task_callback(task_output: Tuple[bytes,UUID]):
+            (result, key) = task_output
             self._task_results[key] = cloudpickle.loads(result)
             self._task_completion_events[key].set()
 
+        self._task_completion_events[key] = Event()
         call_kwargs = await self._optimize_futures(call.keywords)
 
-        try:
-            pickled_func = cloudpickle.dumps(partial(call.func, **call_kwargs))
-        except Exception as e:
-            self.logger.info(e)
-            raise e
+        pickled_task = cloudpickle.dumps(partial(call.func, **call_kwargs))
 
         self._pool.apply_async(
-            partial(run, pickled_func),
+            partial(run_remote_task, pickled_task),
             (key,),
-            callback=callback,
+            callback=remote_task_callback,
         )
 
     async def wait(self, key: UUID, timeout: float = None) -> Optional[State]:
-        print(f"calling wait for {str(key)}")
+        """
+        Waits for the completion of a task with a given key and then returns
+        its state.
+        """
 
         result: State = None
 
@@ -233,12 +224,12 @@ class MultiprocessTaskRunner(BaseTaskRunner):
 
     async def _optimize_futures(self, expr):
         """
-        Exchange PrefectFutures for ray-compatible futures
+        Await PrefectFutures before proceeding.
         """
 
         async def visit_fn(expr):
             """
-            Resolves ray futures when used as dependencies
+            Resolves Prefect futures when used as dependencies
             """
             if isinstance(expr, PrefectFuture):
                 running_task = self._task_completion_events[expr.key]
@@ -253,10 +244,6 @@ class MultiprocessTaskRunner(BaseTaskRunner):
     async def _start(self, exit_stack: AsyncExitStack):
         """
         Start the task runner and prep for context exit.
-
-        - Creates a cluster if an external address is not set.
-        - Creates a client to connect to the cluster.
-        - Pushes a call to wait for all running futures to complete on exit.
         """
 
         self.logger.info("Creating a local multiprocessing pool...")

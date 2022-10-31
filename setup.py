@@ -8,7 +8,7 @@ with open("requirements.txt") as install_requires_file:
 with open("requirements-dev.txt") as dev_requires_file:
     dev_requires = dev_requires_file.read().strip().split("\n")
 
-with open("README.md") as readme_file:
+with open("README.md", encoding='utf-8') as readme_file:
     readme = readme_file.read()
 
 setup(
