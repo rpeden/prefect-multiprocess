@@ -70,70 +70,25 @@ Example:
     #9
     ```
 """
+import asyncio 
 
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import AsyncExitStack
 from functools import partial
 from multiprocessing.pool import Pool
-import threading
-from typing import Awaitable, Callable, Optional, Tuple, Union
+from typing import Awaitable, Callable, Dict, Optional, Tuple, Union
 from uuid import UUID
 
 import anyio
 import cloudpickle
-from anyio.lowlevel import current_token
 from prefect.futures import PrefectFuture
 from prefect.orion.schemas.states import State
 from prefect.states import exception_to_crashed_state
 from prefect.task_runners import BaseTaskRunner, R, TaskConcurrencyType
 
+from .utilities.asyncutils import Event
 from .utilities.collections import visit_collection_async
-
-
-class ThreadReturn:
-    def set_result(self, return_value):
-        self.return_value = return_value
-
-
-async def run_task_async(task_fn):
-    try:
-        result = await task_fn()
-        return result
-    except BaseException as exc:
-        return await exception_to_crashed_state(exc)
-
-
-def task_thread(task_fn, result_obj):
-    result = anyio.run(run_task_async, task_fn)
-    result_obj.set_result(result)
-
-
-def run_remote_task(task_callable, key):
-    unpickled_call = cloudpickle.loads(task_callable)
-    # run the remote task in a new thread
-    task_output = ThreadReturn()
-    worker_thread = threading.Thread(
-        target=task_thread, args=(unpickled_call, task_output)
-    )
-    worker_thread.start()
-    worker_thread.join()
-
-    result = cloudpickle.dumps(
-        task_output.return_value
-    )  
-    return (result, key)
-
-
-
-class Event:
-    def __init__(self):
-        self._loop = current_token()
-        self._event = anyio.Event()
-
-    def set(self):
-        self._loop.call_soon_threadsafe(self._event.set)
-
-    async def wait(self):
-        await self._event.wait()
+from .utilities.remote import run_remote_task
 
 
 class MultiprocessTaskRunner(BaseTaskRunner):
@@ -141,8 +96,8 @@ class MultiprocessTaskRunner(BaseTaskRunner):
     A parallel task_runner that submits tasks to uses Python's `multiprocessing`
     module to run tasks using multiple Python processes.
     Args:
-        number_of_processes (int, optional): The number of processes to use for 
-        running tasks. If not provided, defaults to the number of CPUs on the 
+        number_of_processes (int, optional): The number of processes to use for
+        running tasks. If not provided, defaults to the number of CPUs on the
         host machine.
     Examples:
 
@@ -151,7 +106,7 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         from prefect import flow
         from prefect_multiprocess.task_runners import MultiprocessTaskRunner
 
-        
+
         @flow(task_runner=MultiprocessTaskRunner())
         def my_flow():
             ...
@@ -188,14 +143,24 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         """
         Submits a task to the task runner.
         """
-        def remote_task_callback(task_output: Tuple[bytes,UUID]):
+        if self._pool is None:
+            raise RuntimeError(
+                "Can't run tasks in a MultiprocessingTaskRunner after serialization."
+            )
+
+        def remote_task_callback(task_output: Tuple[bytes, UUID]):
             (result, key) = task_output
             self._task_results[key] = cloudpickle.loads(result)
             self._task_completion_events[key].set()
 
         self._task_completion_events[key] = Event()
+
+        # await any PrefectFutures in this task's dependencies
         call_kwargs = await self._optimize_futures(call.keywords)
 
+        # multiprocessing's default pickler can't handle Prefect tasks,
+        # so we pre-pickle the function before shipping it to another
+        # process
         pickled_task = cloudpickle.dumps(partial(call.func, **call_kwargs))
 
         self._pool.apply_async(
@@ -204,13 +169,15 @@ class MultiprocessTaskRunner(BaseTaskRunner):
             callback=remote_task_callback,
         )
 
-    async def wait(self, key: UUID, timeout: float = None) -> Optional[State]:
+    async def wait(
+        self, key: UUID, timeout: Union[float, None] = None
+    ) -> Optional[State]:
         """
         Waits for the completion of a task with a given key and then returns
         its state.
         """
 
-        result: State = None
+        result: Union[State, None] = None
 
         with anyio.move_on_after(timeout):
             try:
