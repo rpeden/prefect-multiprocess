@@ -18,7 +18,7 @@
 
 ## Welcome!
 
-This Prefect collection contains a Multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound will be complete significantly faster in `ConcurrentTaskRunner`.
+This Prefect collection contains a Multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound will finish significantly faster in `ConcurrentTaskRunner`.
 
 ## Getting Started
 
