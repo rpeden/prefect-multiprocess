@@ -16,7 +16,7 @@ from prefect_multiprocess import MultiprocessTaskRunner
 class TestMultiprocessTaskRunner(TaskRunnerStandardTestSuite):
     @pytest.fixture(scope="session")
     def task_runner(self):
-        yield MultiprocessTaskRunner(number_of_processes=2)
+        yield MultiprocessTaskRunner(processes=2)
 
     @pytest.mark.parametrize("exception", [KeyboardInterrupt(), ValueError("test")])
     async def test_wait_captures_exceptions_as_crashed_state(

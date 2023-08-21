@@ -66,6 +66,8 @@ Example:
     #9
     ```
 """
+import multiprocessing as mp
+import os
 from contextlib import AsyncExitStack
 from functools import partial
 from multiprocessing.pool import Pool
@@ -114,8 +116,8 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         ```
     """
 
-    def __init__(self, number_of_processes: Union[int, None] = None):
-        self.number_of_processes = number_of_processes
+    def __init__(self, processes: Union[int, None] = None):
+        self.processes = processes
         self._task_results = {}
         self._task_completion_events = {}
 
@@ -130,7 +132,7 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         Returns a new instance of `MultiprocessTaskRunner` using the same settings
         as this instance.
         """
-        return MultiprocessTaskRunner(number_of_processes=self.number_of_processes)
+        return MultiprocessTaskRunner(processes=self.processes)
 
     async def submit(
         self,
@@ -234,15 +236,17 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         """
         Start the task runner and prep for context exit.
         """
+        # Use `spawn` to create processes, because forking breaks Prefect.
+        ctx = mp.get_context("spawn")
 
-        self.logger.info("Creating a local multiprocessing pool...")
-        self._pool = Pool(processes=self.number_of_processes)
+        self._pool = ctx.Pool(processes=self.processes)
         exit_stack.push(self._pool)
 
+        process_count = self.processes if self.processes is not None else os.cpu_count()
         self.logger.info(
             (
                 "Created a multiprocessing pool with "
-                f"{self.number_of_processes} processes."
+                f"{process_count} processes."
             )
         )
 
