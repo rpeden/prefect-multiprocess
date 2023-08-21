@@ -1,9 +1,5 @@
 """
-Interface and implementations of the Multiprocess task runner.
-[Task Runners](https://orion-docs.prefect.io/api-ref/prefect/task-runners/)
-in Prefect are responsible for managing the execution of Prefect task runs.
-Generally speaking, users are not expected to interact with
-task runners outside of configuring and initializing them for a flow.
+A multiprocess task runner for Prefect.
 
 Example:
     ```python
@@ -49,7 +45,7 @@ Example:
         time.sleep(0.5)
         print(f"#{number}")
 
-    @flow(task_runner=MultiprocessTaskRunner)
+    @flow(task_runner=MultiprocessTaskRunner())
     def count_to(highest_number):
         for number in range(highest_number):
             shout.submit(number)
@@ -70,9 +66,6 @@ Example:
     #9
     ```
 """
-import asyncio 
-
-from concurrent.futures import ProcessPoolExecutor
 from contextlib import AsyncExitStack
 from functools import partial
 from multiprocessing.pool import Pool
@@ -81,10 +74,11 @@ from uuid import UUID
 
 import anyio
 import cloudpickle
+from prefect.client.schemas import State
 from prefect.futures import PrefectFuture
-from prefect.orion.schemas.states import State
 from prefect.states import exception_to_crashed_state
 from prefect.task_runners import BaseTaskRunner, R, TaskConcurrencyType
+from prefect.utilities.annotations import BaseAnnotation
 
 from .utilities.asyncutils import Event
 from .utilities.collections import visit_collection_async
@@ -131,37 +125,63 @@ class MultiprocessTaskRunner(BaseTaskRunner):
     def concurrency_type(self) -> TaskConcurrencyType:
         return TaskConcurrencyType.PARALLEL
 
+    def duplicate(self) -> "MultiprocessTaskRunner":
+        """
+        Returns a new instance of `MultiprocessTaskRunner` using the same settings
+        as this instance.
+        """
+        return MultiprocessTaskRunner(number_of_processes=self.number_of_processes)
+
     async def submit(
         self,
         key: UUID,
         call: Callable[..., Awaitable[State[R]]],
     ) -> None:
+        """
+        Submits a task to the task runner.
+        """
+
         if not self._started:
             raise RuntimeError(
                 "The task runner must be started before submitting work."
             )
-        """
-        Submits a task to the task runner.
-        """
+
         if self._pool is None:
             raise RuntimeError(
                 "Can't run tasks in a MultiprocessingTaskRunner after serialization."
             )
 
         def remote_task_callback(task_output: Tuple[bytes, UUID]):
-            (result, key) = task_output
-            self._task_results[key] = cloudpickle.loads(result)
-            self._task_completion_events[key].set()
+            """
+            Callback for when a remote task completes. This is called
+            in the main process.
+            """
+            (result, task_key) = task_output
+            self._task_results[task_key] = cloudpickle.loads(result)
+            self._task_completion_events[task_key].set()
 
         self._task_completion_events[key] = Event()
 
-        # await any PrefectFutures in this task's dependencies
-        call_kwargs = await self._optimize_futures(call.keywords)
+        # Prefect currently passes the call as a partial, so it's
+        # easy to extract the kwargs. Here, we check if the callable
+        # is a partial, and if so, we extract the kwargs and await
+        # any PrefectFutures in the kwargs.
+        if isinstance(call, partial):
+            call_function = call.func
+            call_kwargs = await self._optimize_futures(call.keywords)
+        # If the call is not a function or a partial, raise
+        # an error because we don't know how to unpack the
+        # arguments to resolve any PrefectFutures.
+        else:
+            raise TypeError(
+                f"MultiprocessTaskRunner doesn't know how to handle "
+                f"calls of type {type(call)}."
+            )
 
-        # multiprocessing's default pickler can't handle Prefect tasks,
+        # `multiprocessing`'s default pickler can't handle Prefect tasks,
         # so we pre-pickle the function before shipping it to another
         # process
-        pickled_task = cloudpickle.dumps(partial(call.func, **call_kwargs))
+        pickled_task = cloudpickle.dumps(partial(call_function, **call_kwargs))
 
         self._pool.apply_async(
             partial(run_remote_task, pickled_task),
@@ -198,6 +218,8 @@ class MultiprocessTaskRunner(BaseTaskRunner):
             """
             Resolves Prefect futures when used as dependencies
             """
+            if isinstance(expr, BaseAnnotation):
+                expr = expr.unwrap()
             if isinstance(expr, PrefectFuture):
                 running_task = self._task_completion_events[expr.key]
                 if running_task:
