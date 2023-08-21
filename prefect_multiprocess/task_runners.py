@@ -250,6 +250,15 @@ class MultiprocessTaskRunner(BaseTaskRunner):
             )
         )
 
+    def __eq__(self, other: "MultiprocessTaskRunner") -> bool:
+        """
+        Equality comparison to determine if two `MultiprocessTaskRunner`s are the same.
+        """
+        if type(self) != type(other):
+            return False
+        
+        return self.processes == other.processes
+    
     def __getstate__(self):
         """
         Allow the `MultiprocessTaskRunner` to be serialized by dropping the
