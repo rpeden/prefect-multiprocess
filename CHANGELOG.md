@@ -21,8 +21,8 @@ Added `MultiprocessTaskRunner`.
 
 ## 0.1.0
 
-Released on ????? ?th, 20??.
+Released on August 21, 2023.
 
 ### Added
 
-- `task_name` task - [#1](https://github.com/rpeden/prefect-multiprocess/pull/1)
+- `MultiprocessTaskRunner`
