@@ -12,7 +12,7 @@
 
 ## Welcome!
 
-This Prefect collection contains a multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound may finish more quickly in `ConcurrentTaskRunner`. It's useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
+This Prefect collection contains a multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel. It is useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
 
 ## Getting Started
 
