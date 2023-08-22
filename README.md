@@ -18,16 +18,16 @@
 
 ## Welcome!
 
-This Prefect collection contains a Multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound will finish significantly faster in `ConcurrentTaskRunner`.
+This Prefect collection contains a multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel, and should be faster than `ConcurrentTaskRunner` in that scenario. However, tasks that are more I/O-bound than CPU-bound may finish more quickly in `ConcurrentTaskRunner`. It's useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
 
 ## Getting Started
 
 Install the package by running:
 ```
-pip install git+https://github.com/rpeden/prefect-multiprocess
+pip install prefect-multiprocess
 ```
 
-Then, use the task runner in your Prefect flows. The task runner only accepts one parameter: `number_of_processes`, which controls the number of worker processes to start for running tasks. If not provided, it defaults to the number of CPUs on the host machine.
+Then, use the task runner in your Prefect flows. The task runner only accepts one parameter: `processes`, which controls the number of worker processes to start for running tasks. If not provided, it defaults to the number of CPUs on the host machine.
 
 Examples:
 
@@ -44,7 +44,7 @@ def my_flow():
 
 Customizing the number of processes:
 ```python
-@flow(task_runner=MultiprocessTaskRunner(number_of_processes=4))
+@flow(task_runner=MultiprocessTaskRunner(processes=4))
 def my_flow():
     ...
 ```
@@ -55,13 +55,15 @@ Requires an installation of Python 3.8+.
 
 We recommend using a Python virtual environment manager such as pipenv, conda or virtualenv.
 
-These tasks are designed to work with Prefect 2.0. For more information about how to use Prefect, please refer to the [Prefect documentation](https://orion-docs.prefect.io/).
+These tasks are designed to work with Prefect 2.0. For more information about how to use Prefect, please refer to the [Prefect documentation](https://docs.prefect.io/).
+
+## Limitations
+
+`MultiprocessTaskRunner` uses `cloudpickle` to serialize tasks and return values, so task parameters and returns need to be values that `cloudpickle` can handle.
 
 ## Resources
 
 If you encounter any bugs while using `prefect-multiprocess`, feel free to open an issue in the [prefect-multiprocess](https://github.com/rpeden/prefect-multiprocess) repository.
-
-If you have any questions or issues while using `prefect-multiprocess`, you can find help in either the [Prefect Discourse forum](https://discourse.prefect.io/) or the [Prefect Slack community](https://prefect.io/slack).
 
 Feel free to ⭐️ or watch [`prefect-multiprocess`](https://github.com/rpeden/prefect-multiprocess) for updates too!
 
