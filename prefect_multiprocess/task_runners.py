@@ -190,7 +190,6 @@ class MultiprocessTaskRunner(BaseTaskRunner):
             try:
                 await self._futures[key]
                 result = cloudpickle.loads(self._futures[key].result())
-                del self._futures[key]
             except BaseException as exc:
                 result = await exception_to_crashed_state(exc)
 
