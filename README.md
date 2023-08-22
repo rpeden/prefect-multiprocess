@@ -2,18 +2,12 @@
 
 <p align="center">
     <a href="https://pypi.python.org/pypi/prefect-multiprocess/" alt="PyPI version">
-        <img alt="PyPI" src="https://img.shields.io/pypi/v/prefect-multiprocess?color=0052FF&labelColor=090422"></a>
+        <img alt="PyPI" src="https://img.shields.io/pypi/v/prefect-multiprocess?color=0052FF&labelColor=090422"></a>&nbsp;&nbsp;
     <a href="https://github.com/rpeden/prefect-multiprocess/" alt="Stars">
-        <img src="https://img.shields.io/github/stars/rpeden/prefect-multiprocess?color=0052FF&labelColor=090422" /></a>
-    <a href="https://pepy.tech/badge/prefect-multiprocess/" alt="Downloads">
-        <img src="https://img.shields.io/pypi/dm/prefect-multiprocess?color=0052FF&labelColor=090422" /></a>
+        <img src="https://img.shields.io/github/stars/rpeden/prefect-multiprocess?color=0052FF&labelColor=090422" /></a>&nbsp;&nbsp;
     <a href="https://github.com/rpeden/prefect-multiprocess/pulse" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/rpeden/prefect-multiprocess?color=0052FF&labelColor=090422" /></a>
     <br>
-    <a href="https://prefect-community.slack.com" alt="Slack">
-        <img src="https://img.shields.io/badge/slack-join_community-red.svg?color=0052FF&labelColor=090422&logo=slack" /></a>
-    <a href="https://discourse.prefect.io/" alt="Discourse">
-        <img src="https://img.shields.io/badge/discourse-browse_forum-red.svg?color=0052FF&labelColor=090422&logo=discourse" /></a>
 </p>
 
 ## Welcome!
