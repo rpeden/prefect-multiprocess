@@ -13,7 +13,7 @@ with open("README.md", encoding='utf-8') as readme_file:
 
 setup(
     name="prefect-multiprocess",
-    description="Prefect multiprocess task runner.",
+    description="A multiprocess task runner for Prefect 2.8.3+.",
     license="Apache License 2.0",
     author="Ryan Peden",
     author_email="ryan@rpeden.com",
