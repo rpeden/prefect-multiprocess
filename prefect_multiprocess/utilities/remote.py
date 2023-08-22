@@ -17,12 +17,10 @@ async def run_task_async(task_fn, timeout_seconds=None):
         return await exception_to_crashed_state(exc)
 
 
-def run_remote_task(task_callable, key):
+def run_remote_task(task_callable):
     unpickled_call = cloudpickle.loads(task_callable)
     task = unpickled_call.keywords.get("task")
     timeout_seconds = task.timeout_seconds if task else None
 
     task_result = anyio.run(run_task_async, unpickled_call, timeout_seconds)
-    return_result = cloudpickle.dumps(task_result)
-
-    return return_result, key
+    return cloudpickle.dumps(task_result)

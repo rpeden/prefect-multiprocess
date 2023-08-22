@@ -66,12 +66,13 @@ Example:
     #9
     ```
 """
+import asyncio
 import multiprocessing as mp
 import os
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import AsyncExitStack
 from functools import partial
-from multiprocessing.pool import Pool
-from typing import Awaitable, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Optional, Union
 from uuid import UUID
 
 import anyio
@@ -82,7 +83,6 @@ from prefect.states import exception_to_crashed_state
 from prefect.task_runners import BaseTaskRunner, R, TaskConcurrencyType
 from prefect.utilities.annotations import BaseAnnotation
 
-from .utilities.asyncutils import Event
 from .utilities.collections import visit_collection_async
 from .utilities.remote import run_remote_task
 
@@ -93,11 +93,11 @@ class MultiprocessTaskRunner(BaseTaskRunner):
     module to run tasks using multiple Python processes.
     Args:
         number_of_processes (int, optional): The number of processes to use for
-        running tasks. If not provided, defaults to the number of CPUs on the
+        running tasks. If not provided, defaults to the number of CPUs/cores/threads on the
         host machine.
     Examples:
 
-        Create one process for every CPU/CPU core
+        Create one process for every CPU/CPU core/hyperthread
         ```python
         from prefect import flow
         from prefect_multiprocess.task_runners import MultiprocessTaskRunner
@@ -110,17 +110,15 @@ class MultiprocessTaskRunner(BaseTaskRunner):
 
         Customizing the number of processes:
         ```python
-        @flow(task_runner=MultiprocessTaskRunner(number_of_processes=4))
+        @flow(task_runner=MultiprocessTaskRunner(processes=4))
         def my_flow():
             ...
         ```
     """
 
     def __init__(self, processes: Union[int, None] = None):
-        self.processes = processes
-        self._task_results = {}
-        self._task_completion_events = {}
-
+        self.processes: Union[int, None] = processes
+        self._futures: Dict[UUID, asyncio.Future] = {}
         super().__init__()
 
     @property
@@ -148,30 +146,20 @@ class MultiprocessTaskRunner(BaseTaskRunner):
                 "The task runner must be started before submitting work."
             )
 
-        if self._pool is None:
+        if self._executor is None:
             raise RuntimeError(
-                "Can't run tasks in a MultiprocessingTaskRunner after serialization."
+                "Can't run tasks in a MultiprocessTaskRunner without an executor."
             )
 
-        def remote_task_callback(task_output: Tuple[bytes, UUID]):
-            """
-            Callback for when a remote task completes. This is called
-            in the main process.
-            """
-            (result, task_key) = task_output
-            self._task_results[task_key] = cloudpickle.loads(result)
-            self._task_completion_events[task_key].set()
-
-        self._task_completion_events[key] = Event()
-
-        # Prefect currently passes the call as a partial, so it's
+        # Prefect passes the call as a partial, so it's
         # easy to extract the kwargs. Here, we check if the callable
         # is a partial, and if so, we extract the kwargs and await
         # any PrefectFutures in the kwargs.
         if isinstance(call, partial):
             call_function = call.func
-            call_kwargs = await self._optimize_futures(call.keywords)
-        # If the call is not a function or a partial, raise
+            call_kwargs = await self._resolve_prefect_futures(call.keywords)
+
+        # If the call is somehow not a partial, raise
         # an error because we don't know how to unpack the
         # arguments to resolve any PrefectFutures.
         else:
@@ -180,15 +168,12 @@ class MultiprocessTaskRunner(BaseTaskRunner):
                 f"calls of type {type(call)}."
             )
 
-        # `multiprocessing`'s default pickler can't handle Prefect tasks,
-        # so we pre-pickle the function before shipping it to another
-        # process
+        # The default pickler can't handle Prefect tasks,
+        # so we pre-pickle the function before shipping it.
         pickled_task = cloudpickle.dumps(partial(call_function, **call_kwargs))
 
-        self._pool.apply_async(
-            partial(run_remote_task, pickled_task),
-            (key,),
-            callback=remote_task_callback,
+        self._futures[key] = asyncio.wrap_future(
+            self._executor.submit(run_remote_task, pickled_task)
         )
 
     async def wait(
@@ -203,34 +188,36 @@ class MultiprocessTaskRunner(BaseTaskRunner):
 
         with anyio.move_on_after(timeout):
             try:
-                await self._task_completion_events[key].wait()
-                result = self._task_results[key]
-                del self._task_completion_events[key]
+                await self._futures[key]
+                result = cloudpickle.loads(self._futures[key].result())
+                del self._futures[key]
             except BaseException as exc:
                 result = await exception_to_crashed_state(exc)
 
         return result
 
-    async def _optimize_futures(self, expr):
+    async def _resolve_prefect_futures(self, expr: Any):
         """
-        Await PrefectFutures before proceeding.
+        Resolves any `PrefectFuture`s in task arguments
+        before proceeding.
         """
 
-        async def visit_fn(expr):
+        async def visit(expr):
             """
             Resolves Prefect futures when used as dependencies
             """
+            # unwrap annotations like `allow_failure`
             if isinstance(expr, BaseAnnotation):
                 expr = expr.unwrap()
             if isinstance(expr, PrefectFuture):
-                running_task = self._task_completion_events[expr.key]
+                running_task = self._futures[expr.key]
                 if running_task:
-                    await running_task.wait()
-                    return self._task_results[expr.key]
-            # Fallback to return the expression unaltered
+                    await running_task
+                    return cloudpickle.loads(running_task.result())
+
             return expr
 
-        return await visit_collection_async(expr, visit_fn=visit_fn, return_data=True)
+        return await visit_collection_async(expr, visit_fn=visit, return_data=True)
 
     async def _start(self, exit_stack: AsyncExitStack):
         """
@@ -239,13 +226,14 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         # Use `spawn` to create processes, because forking breaks Prefect.
         ctx = mp.get_context("spawn")
 
-        self._pool = ctx.Pool(processes=self.processes)
-        exit_stack.push(self._pool)
-
         process_count = self.processes if self.processes is not None else os.cpu_count()
+        self._executor = ProcessPoolExecutor(max_workers=process_count, mp_context=ctx)
+
+        exit_stack.push(self)
+
         self.logger.info(
             (
-                "Created a multiprocessing pool with "
+                "Created a multiprocessing task runner with "
                 f"{process_count} processes."
             )
         )
@@ -256,16 +244,22 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         """
         if type(self) != type(other):
             return False
-        
+
         return self.processes == other.processes
-    
+
+    def __exit__(self, *args):
+        """
+        Cleans up shuts down the task runner.
+        """
+        self._executor.shutdown(wait=True)
+
     def __getstate__(self):
         """
         Allow the `MultiprocessTaskRunner` to be serialized by dropping the
         process pool.
         """
         data = self.__dict__.copy()
-        data.update({k: None for k in {"_pool"}})
+        data.update({k: None for k in {"_executor"}})
         return data
 
     def __setstate__(self, data: dict):
