@@ -1,4 +1,4 @@
-# prefect-multiprocess
+# Prefect Multiprocess Task Runner
 
 <p align="center">
     <a href="https://pypi.python.org/pypi/prefect-multiprocess/" alt="PyPI version">
