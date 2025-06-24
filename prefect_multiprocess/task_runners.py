@@ -211,26 +211,26 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
     def submit(
         self,
         task: "Task[P, Coroutine[Any, Any, R]]",
-        parameters: Mapping[str, Any],
+        parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     @overload
     def submit(
         self,
         task: "Task[Any, R]",
-        parameters: Mapping[str, Any],
+        parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     def submit(  # type: ignore[reportIncompatibleMethodOverride]
         self,
-        task: Task[P, R],
+        task: "Task[P, R] | Task[P, Coroutine[Any, Any, R]]",
         parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]:
         """
         Submits a task to the task runner.
@@ -260,18 +260,17 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         )
 
         context = serialize_context()
-        # we don't want to serialize the task runner itself
-        # because we don't want to spin up *another* multiprocess executor
-        # in the child process, so we replace it with Prefect's default ThreadPoolTaskRunner.
+        # we don't want to serialize the task runner itself because we don't want to spin up *another* 
+        # multiprocess executor when the flow engine calls `duplicate` on the task runner in the child process.
+        # So here, we replace it with Prefect's default ThreadPoolTaskRunner.
         if context["flow_run_context"] and "flow" in context["flow_run_context"]:
             setattr(
                 context["flow_run_context"]["flow"],
                 "task_runner",
                 self._remote_task_runner,
             )
+        
         pickled_context = cloudpickle.dumps(context)
-
-        task.__call__
         pickled_task = cloudpickle.dumps([task, submit_kwargs])
         future = self._executor.submit(run_remote_task, pickled_task, pickled_context)
 
