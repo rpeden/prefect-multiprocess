@@ -3,6 +3,7 @@ from typing import Any, Iterable, Optional
 import time
 import uuid
 
+import cloudpickle
 import pytest
 
 from prefect.context import TagsContext, tags
@@ -18,7 +19,7 @@ from prefect.states import Completed, Running
 from prefect.tasks import task
 
 from prefect_multiprocess import MultiprocessTaskRunner
-from prefect_multiprocess.task_runners import MultiprocessPrefectFuture
+from prefect_multiprocess.utilities.remote import run_remote_task
 
 
 @task
@@ -170,8 +171,8 @@ class TestMultiprocessTaskRunner:
                     isinstance(future.task_run_id, uuid.UUID) for future in futures
                 )
                 assert all(
-                    isinstance(future.wrapped_future, Future) # type: ignore
-                    for future in futures  
+                    isinstance(future.wrapped_future, Future)  # type: ignore
+                    for future in futures
                 )
 
                 results = [future.result() for future in futures]
@@ -188,8 +189,8 @@ class TestMultiprocessTaskRunner:
                     isinstance(future.task_run_id, uuid.UUID) for future in futures
                 )
                 assert all(
-                    isinstance(future.wrapped_future, Future) # type: ignore
-                    for future in futures  
+                    isinstance(future.wrapped_future, Future)  # type: ignore
+                    for future in futures
                 )
 
                 results = [future.result() for future in futures]
@@ -231,3 +232,18 @@ class TestMultiprocessTaskRunner:
             return recursive_task.submit(33)
 
         assert test_flow().result() == 0
+
+    def test_remote_run_fails_on_broken_unpickle(self):
+        """
+        Ensures a ValueError is raised when we're unable to successfully unpickle a task
+        in a worker process.
+        """
+        # should fail because it's not a valid task
+        pickled_task = cloudpickle.dumps(
+            "I am not a task, I am a string!"
+        )
+
+        pickled_context = cloudpickle.dumps({})
+
+        with pytest.raises(ValueError):
+            run_remote_task(pickled_task, pickled_context)
