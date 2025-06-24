@@ -12,9 +12,9 @@
 
 ## Welcome!
 
-This Prefect collection contains a multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel. It is useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
+This library contains a multiprocess task runner for Prefect 3.x. It is ideal for running CPU-intensive Prefect tasks in parallel. It is useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
 
-The current release supports Prefect 3+. If you're using Prefect 2, install version 0.1.0 of `prefect-multiprocess`.
+The current release supports Prefect 3+. If you're using Prefect 2, install version 0.1.2 of `prefect-multiprocess`.
 
 ## Getting Started
 
