@@ -83,11 +83,9 @@ from typing import (
     Iterable,
     Mapping,
     Optional,
-    ParamSpec,
-    Self,
-    TypeVar,
     overload,
 )
+from typing_extensions import ParamSpec, TypeVar, Self, Generic
 from uuid import UUID, uuid4
 
 import anyio
