@@ -79,6 +79,7 @@ from typing import (
     Any,
     Coroutine,
     Dict,
+    Generic,
     Iterable,
     Mapping,
     Optional,
@@ -106,11 +107,11 @@ if TYPE_CHECKING:
     from prefect.tasks import Task
 
 P = ParamSpec("P")
-R = TypeVar("R", covariant=True)
+R = TypeVar("R")
 F = TypeVar("F", bound=PrefectFuture[Any])
 
 
-class MultiprocessPrefectFuture[R](PrefectWrappedFuture[R, concurrent.futures.Future]):
+class MultiprocessPrefectFuture(PrefectWrappedFuture[R, concurrent.futures.Future], Generic[R]):
     """
     A Prefect future that wraps an asyncio.Future. This future is used
     when the task run is submitted to a MultiprocessTaskRunner.
