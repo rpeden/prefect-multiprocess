@@ -13,7 +13,7 @@ with open("README.md", encoding='utf-8') as readme_file:
 
 setup(
     name="prefect-multiprocess",
-    description="A multiprocess task runner for Prefect 2.8.3+.",
+    description="A multiprocess task runner for Prefect 3.0+.",
     license="Apache License 2.0",
     author="Ryan Peden",
     author_email="ryan@rpeden.com",
@@ -24,7 +24,7 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     packages=find_packages(exclude=("tests", "docs")),
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     install_requires=install_requires,
     extras_require={"dev": dev_requires},
     classifiers=[
@@ -33,9 +33,10 @@ setup(
         "Intended Audience :: System Administrators",
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Topic :: Software Development :: Libraries",
     ],
 )

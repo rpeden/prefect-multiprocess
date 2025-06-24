@@ -65,29 +65,107 @@ Example:
     #8
     #9
     ```
+
+Note that I/O-bound tasks will not benefit from this task runner, as it is designed for CPU-bound tasks. I/O-bound tasks should use the `ThreadPoolTaskRunner` instead.
+MultiprocessTaskRunner will still work find with I/O-bound tasks, but it will not provide any performance benefits - in fact, it'll be a bit slower due to the overhead
+of creating and managing multiple processes.
 """
-import asyncio
-import multiprocessing as mp
+
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
-from contextlib import AsyncExitStack
-from functools import partial
-from typing import Any, Awaitable, Callable, Dict, Optional, Union
-from uuid import UUID
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Coroutine,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    ParamSpec,
+    Self,
+    TypeVar,
+    overload,
+)
+from uuid import UUID, uuid4
 
 import anyio
 import cloudpickle
-from prefect.client.schemas import State
-from prefect.futures import PrefectFuture
-from prefect.states import exception_to_crashed_state
-from prefect.task_runners import BaseTaskRunner, R, TaskConcurrencyType
-from prefect.utilities.annotations import BaseAnnotation
+import concurrent.futures
+from prefect import Task
+from prefect.context import serialize_context
+from prefect.client.schemas.objects import TaskRunInput, State
+from prefect.futures import PrefectFuture, PrefectFutureList, PrefectWrappedFuture
+from prefect.task_runners import TaskRunner, ThreadPoolTaskRunner
+from prefect.utilities.collections import visit_collection
 
-from .utilities.collections import visit_collection_async
 from .utilities.remote import run_remote_task
 
 
-class MultiprocessTaskRunner(BaseTaskRunner):
+if TYPE_CHECKING:
+    from prefect.tasks import Task
+
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)
+F = TypeVar("F", bound=PrefectFuture[Any])
+
+
+class MultiprocessPrefectFuture[R](PrefectWrappedFuture[R, concurrent.futures.Future]):
+    """
+    A Prefect future that wraps an asyncio.Future. This future is used
+    when the task run is submitted to a MultiprocessTaskRunner.
+    """
+
+    def wait(self, timeout: Optional[float] = None) -> None:
+        result = None
+        try:
+            if timeout is not None:
+                # asyncio futures do not support timeouts, so we
+                # can improvise by using `anyio.fail_after`
+                with anyio.fail_after(timeout):
+                    result = cloudpickle.loads(self._wrapped_future.result())
+            else:
+                result = cloudpickle.loads(self._wrapped_future.result())
+
+        except Exception:
+            # It failed, or timed out. Either way, we're done waiting so we can GTFO.
+            return
+        if isinstance(result, State):
+            self._final_state = result
+
+    def result(
+        self,
+        timeout: Optional[float] = None,
+        raise_on_failure: bool = True,
+    ) -> R:
+        if not self._final_state:
+            future_result = None
+
+            # Like `wait`, we can use `anyio.fail_after` to
+            # implement a timeout for the result.
+            if timeout is not None:
+                # not going to bother catching the timeout exception
+                # because we want that to propagate up the call stack
+                with anyio.fail_after(timeout):
+                    future_result = cloudpickle.loads(self._wrapped_future.result())
+            else:
+                # We'll wait forever if we have to!
+                future_result = cloudpickle.loads(self._wrapped_future.result())
+
+            if isinstance(future_result, State):
+                self._final_state = future_result
+            else:
+                return future_result
+
+        result = self._final_state.result(raise_on_failure=raise_on_failure)
+
+        if isinstance(result, Exception):
+            raise result
+        else:
+            return result
+
+
+class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
     """
     A parallel task_runner that submits tasks to uses Python's `multiprocessing`
     module to run tasks using multiple Python processes.
@@ -116,27 +194,45 @@ class MultiprocessTaskRunner(BaseTaskRunner):
         ```
     """
 
-    def __init__(self, processes: Union[int, None] = None):
-        self.processes: Union[int, None] = processes
-        self._futures: Dict[UUID, asyncio.Future] = {}
+    def __init__(self, processes: Optional[int] = None):
         super().__init__()
-
-    @property
-    def concurrency_type(self) -> TaskConcurrencyType:
-        return TaskConcurrencyType.PARALLEL
+        self._process_count: Optional[int] = processes
+        self._futures: Dict[UUID, concurrent.futures.Future[bytes]] = {}
+        self._remote_task_runner: TaskRunner = ThreadPoolTaskRunner()
 
     def duplicate(self) -> "MultiprocessTaskRunner":
         """
         Returns a new instance of `MultiprocessTaskRunner` using the same settings
         as this instance.
         """
-        return MultiprocessTaskRunner(processes=self.processes)
 
-    async def submit(
+        return MultiprocessTaskRunner(processes=self._process_count)
+
+    @overload
+    def submit(
         self,
-        key: UUID,
-        call: Callable[..., Awaitable[State[R]]],
-    ) -> None:
+        task: "Task[P, Coroutine[Any, Any, R]]",
+        parameters: Mapping[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        dependencies: Mapping[str, set[TaskRunInput]] | None = None,
+    ) -> MultiprocessPrefectFuture[R]: ...
+
+    @overload
+    def submit(
+        self,
+        task: "Task[Any, R]",
+        parameters: Mapping[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        dependencies: Mapping[str, set[TaskRunInput]] | None = None,
+    ) -> MultiprocessPrefectFuture[R]: ...
+
+    def submit(  # type: ignore[reportIncompatibleMethodOverride]
+        self,
+        task: Task[P, R],
+        parameters: dict[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        dependencies: dict[str, set[TaskRunInput]] | None = None,
+    ) -> MultiprocessPrefectFuture[R]:
         """
         Submits a task to the task runner.
         """
@@ -151,106 +247,144 @@ class MultiprocessTaskRunner(BaseTaskRunner):
                 "Can't run tasks in a MultiprocessTaskRunner without an executor."
             )
 
-        # Prefect passes the call as a partial, so it's
-        # easy to extract the kwargs. Here, we check if the callable
-        # is a partial, and if so, we extract the kwargs and await
-        # any PrefectFutures in the kwargs.
-        if isinstance(call, partial):
-            call_function = call.func
-            call_kwargs = await self._resolve_prefect_futures(call.keywords)
+        parameters = self._resolve_prefect_futures(parameters)
+        wait_for = self._resolve_prefect_futures(wait_for) if wait_for else None
 
-        # If the call is somehow not a partial, raise
-        # an error because we don't know how to unpack the
-        # arguments to resolve any PrefectFutures.
-        else:
-            raise TypeError(
-                f"MultiprocessTaskRunner doesn't know how to handle "
-                f"calls of type {type(call)}."
-            )
+        task_run_id = uuid4()
 
-        # The default pickler can't handle Prefect tasks,
-        # so we pre-pickle the function before shipping it.
-        pickled_task = cloudpickle.dumps(partial(call_function, **call_kwargs))
-
-        self._futures[key] = asyncio.wrap_future(
-            self._executor.submit(run_remote_task, pickled_task)
+        submit_kwargs: dict[str, Any] = dict(
+            task_run_id=task_run_id,
+            parameters=parameters,
+            wait_for=wait_for,
+            return_type="state",
+            dependencies=dependencies,
         )
 
-    async def wait(
-        self, key: UUID, timeout: Union[float, None] = None
-    ) -> Optional[State]:
+        context = serialize_context()
+        # we don't want to serialize the task runner itself
+        # because we don't want to spin up *another* multiprocess executor
+        # in the child process, so we replace it with Prefect's default ThreadPoolTaskRunner.
+        if context["flow_run_context"] and "flow" in context["flow_run_context"]:
+            setattr(
+                context["flow_run_context"]["flow"],
+                "task_runner",
+                self._remote_task_runner,
+            )
+        pickled_context = cloudpickle.dumps(context)
+
+        task.__call__
+        pickled_task = cloudpickle.dumps([task, submit_kwargs])
+        future = self._executor.submit(run_remote_task, pickled_task, pickled_context)
+
+        self._futures[task_run_id] = future
+
+        return MultiprocessPrefectFuture[R](
+            task_run_id=task_run_id, wrapped_future=future
+        )
+
+    @overload
+    def map(
+        self,
+        task: "Task[P, Coroutine[Any, Any, R]]",
+        parameters: dict[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+    ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]: ...
+
+    @overload
+    def map(
+        self,
+        task: "Task[Any, R]",
+        parameters: dict[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+    ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]: ...
+
+    def map(  # type: ignore[reportIncompatibleMethodOverride]
+        self,
+        task: "Task[P, R]",
+        parameters: dict[str, Any],
+        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+    ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]:
+        return super().map(task, parameters, wait_for)
+
+    def cancel(self, key: UUID) -> None:
         """
-        Waits for the completion of a task with a given key and then returns
-        its state.
+        Cancels a task with the given key.
+        """
+        if key not in self._futures:
+            raise KeyError(f"No task with key {key} is currently running.")
+
+        future = self._futures[key]
+        future.cancel()
+
+        # Remove the cancelled future from the dictionary
+        del self._futures[key]
+
+    def cancel_all(self) -> None:
+        """
+        Cancels all tasks that are currently running.
         """
 
-        result: Union[State, None] = None
+        for key in list(self._futures.keys()):
+            self.cancel(key)
 
-        with anyio.move_on_after(timeout):
-            try:
-                await self._futures[key]
-                result = cloudpickle.loads(self._futures[key].result())
-            except BaseException as exc:
-                result = await exception_to_crashed_state(exc)
+        # Clear the futures dictionary
+        self._futures.clear()
 
-        return result
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._started = False
 
-    async def _resolve_prefect_futures(self, expr: Any):
+    def _resolve_prefect_futures(self, expr: Any):
         """
-        Resolves any `PrefectFuture`s in task arguments
+        Resolves any `MultiprocessPrefectFuture`s in task arguments
         before proceeding.
         """
 
-        async def visit(expr):
-            """
-            Resolves Prefect futures when used as dependencies
-            """
-            # unwrap annotations like `allow_failure`
-            if isinstance(expr, BaseAnnotation):
-                expr = expr.unwrap()
-            if isinstance(expr, PrefectFuture):
-                running_task = self._futures[expr.key]
-                if running_task:
-                    await running_task
-                    return cloudpickle.loads(running_task.result())
-
+        def visit(expr: Any) -> Any:
+            if isinstance(expr, MultiprocessPrefectFuture):
+                return expr.wrapped_future
+            # Fallback to return the expression unaltered
             return expr
 
-        return await visit_collection_async(expr, visit_fn=visit, return_data=True)
+        return visit_collection(expr, visit_fn=visit, return_data=True)
 
-    async def _start(self, exit_stack: AsyncExitStack):
+        # Register the cloudpickle reducer for Prefect futures
+
+    def __enter__(self) -> Self:
         """
         Start the task runner and prep for context exit.
         """
         # Use `spawn` to create processes, because forking breaks Prefect.
-        ctx = mp.get_context("spawn")
-
-        process_count = self.processes if self.processes is not None else os.cpu_count()
-        self._executor = ProcessPoolExecutor(max_workers=process_count, mp_context=ctx)
-
-        exit_stack.push(self)
-
-        self.logger.info(
-            (
-                "Created a multiprocessing task runner with "
-                f"{process_count} processes."
-            )
+        super().__enter__()
+        ctx = multiprocessing.get_context("spawn")
+        process_count = (
+            self._process_count if self._process_count is not None else os.cpu_count()
         )
+        self._executor = ProcessPoolExecutor(max_workers=process_count, mp_context=ctx)
+        self.logger.info(
+            (f"Created a multiprocess task runner with {process_count} processes.")
+        )
+        # log process id
+        self.logger.info(f"MultiprocessTaskRunner process ID: {os.getpid()}")
+        return self
 
-    def __eq__(self, other: "MultiprocessTaskRunner") -> bool:
+    def __eq__(self, other) -> bool:
         """
         Equality comparison to determine if two `MultiprocessTaskRunner`s are the same.
         """
         if type(self) != type(other):
             return False
 
-        return self.processes == other.processes
+        if type(other) is not MultiprocessTaskRunner:
+            return False
+
+        return self._process_count == other._process_count
 
     def __exit__(self, *args):
         """
         Cleans up shuts down the task runner.
         """
-        self._executor.shutdown(wait=True)
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._started = False
 
     def __getstate__(self):
         """

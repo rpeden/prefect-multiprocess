@@ -1,26 +1,29 @@
 import anyio
 import cloudpickle
-from prefect.states import exception_to_crashed_state, exception_to_failed_state
+
+from functools import partial
+from prefect.task_engine import run_task_sync, run_task_async
+
+import prefect
 
 
-async def run_task_async(task_fn, timeout_seconds=None):
-    try:
-        with anyio.move_on_after(timeout_seconds) as scope:
-            result = await task_fn()
+def run_remote_task(pickled_task: bytes, pickled_context: bytes) -> bytes:
+    """
+    Runs a task that has been serialized with cloudpickle.
+    This function is intended to be used in a remote context, such as a worker process.
+    """
+    task: prefect.Task | None = None
+    submit_kwargs: dict = {}
+    [task, submit_kwargs] = cloudpickle.loads(pickled_task)
+    context = cloudpickle.loads(pickled_context)
 
-        if scope.cancel_called:
-            exc = TimeoutError(f"Task timed out after {timeout_seconds} seconds.")
-            result = await exception_to_failed_state(exc)
+    task_result = None
+    if task and task.isasync:
+        task_result = anyio.run(
+            partial(run_task_async, task=task, context=context, **submit_kwargs)
+        )
+    else:
+        task_run = partial(run_task_sync, task=task, context=context, **submit_kwargs)
+        task_result = task_run()
 
-        return result
-    except BaseException as exc:
-        return await exception_to_crashed_state(exc)
-
-
-def run_remote_task(task_callable):
-    unpickled_call = cloudpickle.loads(task_callable)
-    task = unpickled_call.keywords.get("task")
-    timeout_seconds = task.timeout_seconds if task else None
-
-    task_result = anyio.run(run_task_async, unpickled_call, timeout_seconds)
     return cloudpickle.dumps(task_result)

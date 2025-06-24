@@ -26,3 +26,9 @@ Released on August 21, 2023.
 ### Added
 
 - `MultiprocessTaskRunner`
+
+## 0.2.0
+
+### Changed
+
+- Updated `MultiprocessTaskRunner` to work with Prefect 3.

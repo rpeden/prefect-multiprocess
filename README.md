@@ -14,12 +14,16 @@
 
 This Prefect collection contains a multiprocess task runner. It is ideal for running CPU-intensive Prefect tasks in parallel. It is useful in scenarios where you want to spread computation across multiple CPU cores on a single machine without adding heavy dependencies like Dask. This package does not require any extra dependencies beyond what Prefect already installs.
 
+The current release supports Prefect 3+. If you're using Prefect 2, install version 0.1.0 of `prefect-multiprocess`.
+
 ## Getting Started
 
 Install the package by running:
 ```
 pip install prefect-multiprocess
 ```
+
+Or use `uv` or whichever package manager you prefer.
 
 Then, use the task runner in your Prefect flows. The task runner only accepts one parameter: `processes`, which controls the number of worker processes to start for running tasks. If not provided, it defaults to the number of CPUs on the host machine.
 
@@ -45,7 +49,7 @@ def my_flow():
 
 ### Python setup
 
-Requires an installation of Python 3.8+.
+Requires an installation of Python 3.10+.
 
 We recommend using a Python virtual environment manager such as pipenv, conda or virtualenv.
 

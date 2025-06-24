@@ -1,1 +1,1 @@
-prefect>=2.8.3
+prefect>=3.0.0
