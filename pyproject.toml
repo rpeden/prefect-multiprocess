@@ -51,8 +51,8 @@ source = "versioningit"
 default-version = "0.2.0"
 
 [tool.versioningit.vcs]
-match = ["[0-9]*.[0-9]*.[0-9]*", "[0-9]*.[0-9]*.[0-9]*.dev[0-9]*"]
-default-tag = "0.0.0"
+match = ["v[0-9]*.[0-9]*.[0-9]*", "[0-9]*.[0-9]*.[0-9]*.[dev|b|a][0-9]*"]
+default-tag = "v0.0.0"
 
 [tool.versioningit.write]
 method = { module = "write_build_info", value = "write_build_info", module-dir = "tools" }
