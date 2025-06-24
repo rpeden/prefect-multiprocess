@@ -85,7 +85,7 @@ from typing import (
     Optional,
     overload,
 )
-from typing_extensions import ParamSpec, TypeVar, Self, Generic
+from typing_extensions import ParamSpec, TypeVar, Self
 from uuid import UUID, uuid4
 
 import anyio
@@ -212,8 +212,8 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         self,
         task: "Task[P, Coroutine[Any, Any, R]]",
         parameters: Mapping[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
-        dependencies: Mapping[str, set[TaskRunInput]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
+        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     @overload
@@ -221,16 +221,16 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         self,
         task: "Task[Any, R]",
         parameters: Mapping[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
-        dependencies: Mapping[str, set[TaskRunInput]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
+        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     def submit(  # type: ignore[reportIncompatibleMethodOverride]
         self,
         task: Task[P, R],
         parameters: dict[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
-        dependencies: dict[str, set[TaskRunInput]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
+        dependencies: Optional[Mapping[str, set[TaskRunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]:
         """
         Submits a task to the task runner.
@@ -286,7 +286,7 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         self,
         task: "Task[P, Coroutine[Any, Any, R]]",
         parameters: dict[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
     ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]: ...
 
     @overload
@@ -294,14 +294,14 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         self,
         task: "Task[Any, R]",
         parameters: dict[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
     ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]: ...
 
     def map(  # type: ignore[reportIncompatibleMethodOverride]
         self,
         task: "Task[P, R]",
         parameters: dict[str, Any],
-        wait_for: Iterable[PrefectFuture[Any]] | None = None,
+        wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
     ) -> PrefectFutureList[MultiprocessPrefectFuture[R]]:
         return super().map(task, parameters, wait_for)
 
