@@ -28,8 +28,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          
-          python -m pip install --upgrade pytest prefect
+          python -m pip install --upgrade --upgrade-strategy eager -e ".[dev]"
+          python -m pip install --upgrade pytest
       - name: Run tests
         run: |
           pytest tests
