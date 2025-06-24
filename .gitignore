@@ -1,3 +1,4 @@
+prefect_multiprocess/_build_info.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

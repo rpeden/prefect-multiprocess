@@ -1,0 +1,102 @@
+[build-system]
+requires = ["hatchling", "versioningit"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prefect-multiprocess"
+dynamic = ["version"]
+description = "A multiprocess task runner for Prefect 3.0+."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache License 2.0" }
+authors = [
+    { name = "Ryan Peden", email = "ryan@rpeden.com" }
+]
+keywords = ["prefect"]
+classifiers = [
+    "Natural Language :: English",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+
+dependencies = [
+    "prefect>=3.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+    "uv"
+]
+
+[project.urls]
+Homepage = "https://github.com/rpeden/prefect-multiprocess"
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "docs"]
+
+[tool.hatch.version]
+source = "versioningit"
+
+[tool.versioningit]
+default-version = "0.2.0"
+
+[tool.versioningit.vcs]
+match = ["v[0-9]*.[0-9]*.[0-9]*", "[0-9]*.[0-9]*.[0-9]*.[dev|b|a][0-9]*"]
+default-tag = "v0.0.0"
+
+[tool.versioningit.write]
+method = { module = "write_build_info", value = "write_build_info", module-dir = "tools" }
+path = "prefect_multiprocess/_build_info.py"
+
+[tool.versioningit.format]
+distance = "{base_version}+{distance}.{vcs}{rev}"
+dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
+
+[tool.hatch.build]
+artifacts = ["prefect_multiprocess/_build_info.py"]
+
+[tool.hatch.build.targets.sdist]
+include = ["prefect_multiprocess", "/README.md", "/LICENSE", "/pyproject.toml"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+[tool.flake8]
+exclude = [".git", "__pycache__", "build", "dist"]
+max-line-length = 88
+extend-ignore = ["E203"]
+per-file-ignores = [
+    "setup.py:E501"
+]
+
+[tool.isort]
+skip = ["__init__.py"]
+profile = "black"
+skip_gitignore = true
+multi_line_output = 3
+
+[tool.interrogate]
+ignore-init-module = true
+ignore-init-method = true
+exclude = [
+    "prefect_multiprocess/_version.py",
+    "tests",
+    "setup.py",
+    "versioneer.py",
+    "docs",
+    "site"
+]
+fail-under = 95
+omit-covered-files = true
