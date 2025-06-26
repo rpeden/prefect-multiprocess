@@ -23,7 +23,11 @@ Install the package by running:
 pip install prefect-multiprocess
 ```
 
-Or use `uv` or whichever package manager you prefer.
+or 
+
+```
+uv add prefect-multiprocess
+```
 
 Then, use the task runner in your Prefect flows. The task runner only accepts one parameter: `processes`, which controls the number of worker processes to start for running tasks. If not provided, it defaults to the number of CPUs on the host machine.
 
@@ -49,11 +53,10 @@ def my_flow():
 
 ### Python setup
 
-Requires an installation of Python 3.10+.
+Requires an installation of Python 3.9 or higher.
 
-We recommend using a Python virtual environment manager such as pipenv, conda or virtualenv.
+I recommend using a Python virtual environment manager like [conda](https://www.anaconda.com/docs/getting-started/miniconda/main) or [uv](https://docs.astral.sh/uv/).
 
-These tasks are designed to work with Prefect 2.0. For more information about how to use Prefect, please refer to the [Prefect documentation](https://docs.prefect.io/).
 
 ## Limitations
 
