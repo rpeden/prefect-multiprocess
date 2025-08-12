@@ -90,7 +90,12 @@ from uuid import UUID, uuid4
 import anyio
 import cloudpickle
 from prefect import Task
-from prefect.client.schemas.objects import State, TaskRunInput
+from prefect.client.schemas.objects import State
+# Import TaskRunInput/RunInput as needed to work with multiple Prefect versions
+try:
+    from prefect.client.schemas.objects import TaskRunInput as RunInput
+except ImportError:
+    from prefect.client.schemas.objects import RunInput
 from prefect.context import serialize_context
 from prefect.futures import PrefectFuture, PrefectFutureList, PrefectWrappedFuture
 from prefect.task_runners import TaskRunner, ThreadPoolTaskRunner
@@ -213,7 +218,7 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         task: "Task[P, Coroutine[Any, Any, R]]",
         parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[RunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     @overload
@@ -222,7 +227,7 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         task: "Task[Any, R]",
         parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[RunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]: ...
 
     def submit(  # type: ignore[reportIncompatibleMethodOverride]
@@ -230,7 +235,7 @@ class MultiprocessTaskRunner(TaskRunner[MultiprocessPrefectFuture[R]]):
         task: "Task[P, R] | Task[P, Coroutine[Any, Any, R]]",
         parameters: dict[str, Any],
         wait_for: Optional[Iterable[PrefectFuture[Any]]] = None,
-        dependencies: Optional[dict[str, set[TaskRunInput]]] = None,
+        dependencies: Optional[dict[str, set[RunInput]]] = None,
     ) -> MultiprocessPrefectFuture[R]:
         """
         Submits a task to the task runner.
